@@ -7,6 +7,20 @@ open Friadne.Symbols
 
 /// Wrap formatted lines in box borders and output string
 module Renderer =
+  /// Rendering configuration to allow pure/testing-friendly injection
+  type RenderConfig =
+    { BoxWidth : int
+      SourceProvider : string -> Result<string[], string> }
+
+  let defaultConfig : RenderConfig =
+    { BoxWidth = 80
+      SourceProvider =
+        fun fileName ->
+          try
+            SourceCode.readSourceFile fileName |> Ok
+          with ex ->
+            Result.Error ex.Message }
+
   /// Wrap a line: left border + fill to fixed width
   let private wrapWithBorder (content : string) (maxWidth : int) =
     let displayWidth = Ansi.getDisplayWidth content + 1
@@ -15,9 +29,13 @@ module Renderer =
     Symbols.BoxVerticalWithSpace + paddedContent
 
   /// Render complete diagnostic information (fixed box width: 80)
-  let renderDiagnostic (diagnostic : Diagnostic) : string =
-    let lines = SourceCode.readSourceFile diagnostic.Location.FileName
-    let boxWidth = 80
+  let renderDiagnosticWith (config : RenderConfig) (diagnostic : Diagnostic) : string =
+    let lines =
+      match config.SourceProvider diagnostic.Location.FileName with
+      | Ok content -> content
+      | Result.Error msg -> [| $"[Source unavailable: {msg}]" |]
+
+    let boxWidth = config.BoxWidth
     let contentLines = ResizeArray<string> ()
 
     // Header: code + level + title
@@ -96,3 +114,7 @@ module Renderer =
 
     let finalLines = [ topBorder ] @ wrapped @ [ bottomBorder ; "" ]
     String.Join (Environment.NewLine, finalLines)
+
+  /// Backward-compatible entry point using default configuration
+  let renderDiagnostic (diagnostic : Diagnostic) : string =
+    renderDiagnosticWith defaultConfig diagnostic
